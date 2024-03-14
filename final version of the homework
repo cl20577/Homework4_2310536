@@ -1,0 +1,222 @@
+# Question 1
+
+library(readxl)
+chronotype <- read_excel("C:/Users/cl20577/Desktop/chronotype.xlsx")
+View(chronotype)
+
+This dataset contains information about the health and fitness of participants (e.g. their maximum heart rate, and how long it takes them to complete a 5k run) as well as their chronotype (i.e., whether they identify as energised in the morning or evening).
+
+clean_chrono <- chronotype %>% filter(!is.na(run_min))
+
+We will run a Bayesian model to test this, but first let's define the model we will be using.
+
+Before we do any Bayesian shenanigans, let's clean up and have a look at the raw data. The data needs a bit of tidying in terms of:
+
+filtering out the participants who do not have a running score
+
+computing a new variable which combines the running minutes and running seconds score
+clean_chrono <- clean_chrono %>%
+  mutate(running_new = run_sec/60) %>%
+  mutate(run_total = running_new + run_min)
+
+Let's have a look at a quick plot 
+
+ggplot(data = clean_chrono, aes(x = chronotype, y = run_total, fill = chronotype))+
+  geom_boxplot()+
+  labs(y = "Total Run Time")+
+  ggtitle("Run time depending on chronotype")+
+  theme_minimal()
+
+Run time, on average, is shorter for evening runs, suggesting that those who run in the evening are on average faster than those who run in the morning. This may be due to them having more energy in the evenings compared to the morning runners.
+
+get_prior(run_total ~ chronotype, data = clean_chrono)
+
+my_priors <- c(
+  prior(normal(23,10), class = "Intercept"),
+  prior(normal(2,1), class = "b", coef = "chronotypemorning"), 
+  prior(exponential(1), class = "sigma"))
+
+c2p <- brm(run_total ~ chronotype, 
+           data = clean_chrono,
+           prior = my_priors, 
+           sample_prior = "only")
+
+prior_summary(c2p)
+summary(c2p)
+
+Based on my predictions, for every unit increase in running time, people are more likely to feel more energised. Before even seeing the data I was not convinced that morning and evening runs would not affect total run time.
+
+Now, let's make a plot of these predictions...
+
+my_priors %>% modelr::data_grid(run_total = seq(20,23,10),chronotype) %>%
+  add_epred_draws(c2p, ndraws =500) -> prior_predictions
+
+prior_predictions%>%
+  ggplot(aes(x = .epred, y = chronotype, fill = chronotype))+
+  stat_halfeye()+
+  theme_minimal()+
+  ggtitle("Prior predictions of chronotype on total running time")+
+  labs(x = "running time")
+
+now to use priors for the real data!
+
+real_priors <- brm(run_total ~ chronotype, data = clean_chrono, prior = my_priors)
+
+summary(real_priors)
+
+plot(real_priors)
+
+As we can see, the output from the real data follows a similar trend to that of the predicted model; that is, for every unit increase in running time, people are more likely to feel more energised.
+
+# Question 2
+
+A researcher at a highly prestigious US university (with some great sports scholarships) has run a study on their undergraduates and is about to publish a study where they have found a negative correlation between intelligence and athleticism: the higher the IQ of the students, the lower their athleticism.
+
+Why might this not be true?
+
+the relationship found may be spurious due to potential third variables influencing the relationship that the researcher hasn't accounted for. For example, parental attitudes may play an important role as the parents of these children may also be highly intelligent, so they might have been more likely to encourage engagement with intellectual activities instead of athleticism. The relationship found, therefore, may be explained by parental attitudes towards sports.
+
+Furthermore, the sample is likely to be influencing the results. If it is a highly prestigious school then they are more likely to encourage academic rather than athletic behaviours, despite there being good sports scholarships. Importantly, these scholarships are likely to be limited in number, so there may only be a couple highly athletic students which may further distort the findings. Thus, the relationship may be true for this sample but not a true effect across students in other school's.
+
+
+set.seed(1500)
+n <- 1500
+
+I believe that for a prestigious university, the admissions per year for the whole university will be around 1,500. Compared to Essex, for example, the admission rate is much more stringent.
+
+Intellect_Athleticism <- tibble(
+     IQ = rnorm(n,125,15),
+          Athleticism = (-IQ*0.5),rnorm(n,100,10))
+
+ggplot(Intellect_Athleticism, aes(x = IQ, y = Athleticism))+
+     geom_point(color = "blue")+
+  geom_smooth()+
+     labs(x = "Academic Performance", y = "Athleticism")+
+     theme_minimal()
+
+I_A_LM <- lm(data = Intellect_Athleticism, IQ ~ Athleticism)
+summary(I_A_LM)
+
+So what we can see here is that there is a negative relationship with academic performance and athleticism. This is supposedly what the researcher has found, however, with the consideration of other factors such as personal interest or parental attitudes towards sports, let's see how this might affect the model.
+
+I_A_Personal_Interest <-tibble(
+     IQ = rnorm(n,125,15),
+     Athleticism = (-IQ * 0.5),rnorm(n,100,10),
+     Personal_Interest = IQ+Athleticism+rnorm(n, 75, 10))
+ggplot(data = I_A_Personal_Interest, aes(x = IQ, y = Athleticism))+
+     geom_point(color = "orange")+
+  geom_smooth()+
+     theme_minimal()
+
+For reference, a higher score on Personal Interest corresponds with a liking for more intellectual fields, such as STEM subjects, and a lower Personal Interest score corresponds with an interest in less intellectual courses like humanitarian subjects.
+
+I_A_Personal_Interest <- lm(data = I_A_Personal_Interest, IQ+Personal_Interest ~ Athleticism)
+
+summary(I_A_Personal_Interest)
+
+This output here suggests that for every one unit increase in IQ there is a personal interest increase in more intellectual subjects, which may help explain the relationship found before. Smarter students are more likely to find intellectually demanding subjects more interesting and will therefore be less inclined to engage in sports.
+
+I_A_PA <- tibble(
+     IQ = rnorm(n,125,15),
+     Athleticism = (-IQ * 0.5) + rnorm(n,100,10),
+     Parental_Attitudes = IQ+Athleticism+rnorm(n,10,10))
+ggplot(data = I_A_PA, aes(x = IQ, y = Athleticism))+
+     geom_jitter(color = "red")+
+  geom_smooth()+
+     theme_minimal()
+
+
+IQ_PA_LM <- lm(data = I_A_PA, IQ+Parental_Attitudes ~ Athleticism)
+
+summary(IQ_PA_LM)
+
+This model suggests that for every one unit increase in IQ, parental attitudes towards sports decreases, as such, parents are less likely to encourage their children to be athletic when their child has a higher IQ.
+
+
+So far we have run two separate models looking at how personal interest and parental attitudes affect IQ scores individually. Now, let's run a more comprehensive model by looking at how personal interest and parental attitudes affect IQ in the same model.
+
+comprehensive_model <- tibble(
+     IQ = rnorm(n,125,15),
+     Athleticism = (-IQ * 0.5),rnorm(n,100,10),
+     Personal_Interest = rnorm(n, 75,10),
+     Parental_Attitudes = rnorm(n,10,10)
+)
+
+
+Comp_Model <- lm(data = comprehensive_model, IQ + Personal_Interest +Parental_Attitudes ~ Athleticism)
+
+summary(Comp_Model)
+
+In this model we can see that for every one unit increase in IQ, parental attitudes and personal interest towards sports decreases, suggesting that the relationship between IQ and Athleticism is more likely to be due to the third variable of parental attitudes or personal interest in courses.
+
+There are likely to be many other third variables which are potentially influencing the relationship between Intelligence and Athleticism, however, parental attitudes and personal interest is likely to be a key variable in which the researcher should have considered.
+
+# Question3 
+
+library(readxl)
+threat_data_clean <- read_excel("C:/Users/cl20577/Desktop/threat_data_clean.xlsx")
+View(threat_data_clean)
+
+pca_threat <- prcomp(threat_data_clean)
+
+summary(pca_threat)
+
+factoextra::fviz_eig(pca_threat)
+
+The scree plot here shows to us that there are two principle components - the first of which accounts for 41% of the variance and the second components accounts for 15% of the variance, making for a total of 55% of the variance, thus we will focus on PC1 and PC2.
+
+cor(threat_data_clean)
+
+
+fviz_pca_var(pca_threat, axes = c(1,2), col.var = "contrib",  gradient.cols = c("pink", "blue", "red"))
+
+Let's look a bit deeper by looking at the specific contributions of threat variables for dimension 1.
+
+fviz_contrib(pca_threat, choice="var", axes = 1)
+
+So from this plot we can see that the variables below contribute the most towards the first dimension:
+
+Food deprivation
+
+Lack of medical care
+
+Loss of housing
+
+Illegal drugs
+
+Russian attacks
+
+Diseases
+
+Crime surges
+
+Lack of jobs
+
+Gun violence
+
+Discrimination
+
+Iranian attacks
+
+Climate change
+
+Prescription drugs
+
+North Korean attacks
+
+So in the previous graph, we can see that there are quite a few variables which load onto the second principle component. Again, let's look at the individual contributions for variables on the second dimension.
+
+fviz_contrib(pca_threat, choice="var", axes = 2)
+
+Whereas in dimension 2, there are a few different variables which have large contributions:
+
+Syrian refugees
+
+Illegal immigration
+
+Terror attacks
+
+Poverty
+
+Pollution
+
